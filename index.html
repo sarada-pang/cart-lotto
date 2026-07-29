@@ -60,8 +60,20 @@
 [hidden] { display: none !important; }
 
 html, body { height: 100%; }
-/* 스크롤바 등장/소멸로 폭이 바뀌며 화면이 흔들리는 것 방지 */
+/* 스크롤바 등장/소멸로 폭이 바뀌며 화면이 흔들리는 것 방지 (설정 화면) */
 html { overflow-y: scroll; }
+
+/* 레이스 모드: 페이지 스크롤 완전 차단 — 게임이 남는 공간에 맞춰 축소되고
+   하단 정보창은 항상 통째로 보인다 */
+html.race-mode { overflow: hidden; }
+html.race-mode body { height: 100vh; overflow: hidden; }
+html.race-mode main { flex: 1; min-height: 0; display: flex; padding: 10px 14px; }
+html.race-mode #screen-race { flex: 1; min-height: 0; }
+html.race-mode #game-shell {
+  flex: 1; min-height: 140px;
+  display: flex; align-items: center; justify-content: center;
+}
+html.race-mode #foot { display: none; }
 
 body {
   background: var(--bg);
@@ -203,17 +215,17 @@ main { flex: 1; width: 100%; margin: 0 auto; padding: 14px 16px; }
 .ev-tile:not(.on) .ev-name { text-decoration: line-through; }
 
 /* ── 레이스 화면: 게임이 가로 전폭, 부가정보는 하단에 작게 ── */
-#screen-race { display: flex; flex-direction: column; gap: 12px; }
+#screen-race { display: flex; flex-direction: column; gap: 12px; width: 100%; }
 #game-shell { padding: 8px; background: #000; }
-/* 가로를 최대한 차지하되, 맵 전체가 세로로 잘리지 않는 선까지만 */
+/* 크기는 JS(fitGameWrap)가 뷰포트에 맞춰 계산 — 아래는 초기 폴백 */
 #game-wrap {
-  width: min(100%, calc((100vh - 150px) * 16 / 9));
+  width: min(100%, calc((100vh - 260px) * 16 / 9));
   margin: 0 auto;
   aspect-ratio: 16 / 9;
 }
 #game-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
 
-#race-bottom { display: flex; gap: 12px; align-items: stretch; }
+#race-bottom { display: flex; gap: 12px; align-items: stretch; flex-shrink: 0; }
 #panel-board { flex: 1.5; min-width: 0; }
 #panel-ticker { flex: 1; min-width: 0; }
 .side-panel { padding: 8px 12px; }
@@ -349,6 +361,11 @@ main { flex: 1; width: 100%; margin: 0 auto; padding: 14px 16px; }
 @media (max-width: 900px) {
   #race-bottom { flex-direction: column; }
   #board, #ticker { height: 150px; }
+}
+/* 세로가 낮은 화면: 하단 패널을 줄여 게임 공간 확보 (스크롤/잘림 방지) */
+@media (max-height: 640px) {
+  #board, #ticker { height: 118px; }
+  .side-panel .panel-title.small { margin-bottom: 4px; }
 }
 @media (max-width: 640px) {
   .logo { font-size: 19px; }
@@ -3054,6 +3071,7 @@ CL.ui = (() => {
   }
 
   function showSetup() {
+    document.documentElement.classList.remove('race-mode');
     $('screen-setup').hidden = false;
     $('screen-race').hidden = true;
     $('modal-results').hidden = true;
@@ -3062,6 +3080,7 @@ CL.ui = (() => {
   }
 
   function showRace() {
+    document.documentElement.classList.add('race-mode');
     $('screen-setup').hidden = true;
     $('screen-race').hidden = false;
     $('modal-results').hidden = true;
@@ -3306,17 +3325,30 @@ window.CL = window.CL || {};
     $('names-count').textContent = `${names.length}명`;
   }
 
+  // 게임 화면을 뷰포트 잔여 공간에 딱 맞춤 — 오버플로우 시 게임을 줄인다
+  function fitGameWrap() {
+    if (!document.documentElement.classList.contains('race-mode')) return;
+    const wrap = $('game-wrap');
+    const shell = $('game-shell');
+    const asp = CL.tracks.W / CL.tracks.H;
+    const availW = Math.max(200, shell.clientWidth - 16);
+    const availH = Math.max(120, shell.clientHeight - 16);
+    let w = availW, h = w / asp;
+    if (h > availH) { h = availH; w = h * asp; }
+    wrap.style.aspectRatio = 'auto';
+    wrap.style.width = Math.floor(w) + 'px';
+    wrap.style.height = Math.floor(h) + 'px';
+  }
+  CL.fitGameWrap = fitGameWrap;
+
   function ensureGame() {
     if (CL.game) return;
     // 화면 비율에 맞춰 캔버스 폭 결정 → 어떤 해상도에서도 가로 전폭 사용
-    const wrap = $('game-wrap');
     const shell = $('game-shell');
-    const availW = (shell.clientWidth || window.innerWidth - 40) - 16;
-    const availH = Math.max(300, window.innerHeight - 150);
+    const availW = Math.max(320, (shell.clientWidth || window.innerWidth - 40) - 16);
+    const availH = Math.max(240, (shell.clientHeight || window.innerHeight - 260) - 16);
     CL.tracks.setViewWidth((availW / availH) * CL.tracks.H);
-    const asp = CL.tracks.W / CL.tracks.H;
-    wrap.style.aspectRatio = `${CL.tracks.W} / ${CL.tracks.H}`;
-    wrap.style.width = `min(100%, calc((100vh - 150px) * ${asp.toFixed(4)}))`;
+    fitGameWrap();
     CL.game = new Phaser.Game({
       type: Phaser.AUTO,
       parent: 'game-wrap',
@@ -3343,6 +3375,7 @@ window.CL = window.CL || {};
     if (!CL.game) {
       ensureGame();
     } else {
+      fitGameWrap();
       CL.game.scene.stop('race');
       CL.game.scene.start('race');
     }
@@ -3450,6 +3483,8 @@ window.CL = window.CL || {};
         else document.documentElement.requestFullscreen();
       } catch (e) { /* iframe 등 전체화면 불가 환경 */ }
     });
+
+    window.addEventListener('resize', fitGameWrap);
 
     $('btn-copy').addEventListener('click', CL.ui.copyResults);
     $('btn-rematch').addEventListener('click', () => {
